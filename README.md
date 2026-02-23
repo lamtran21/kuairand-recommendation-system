@@ -5,7 +5,7 @@
 - Minhae Park
 - Minhao Zhang
 - Diana Chen
-- Stenven Si
+- Steven Si
 - Akshaj Chandwani
 - Khalil He
 

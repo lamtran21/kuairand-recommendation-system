@@ -1,9 +1,6 @@
-data/
 # only allow csv in that folder (and its subfolders)
 *.csv
-!Data/
-!Data/data/
-!Data/data/**/*.csv
+!data/**/*.csv
 
 *.parquet
 *.pkl

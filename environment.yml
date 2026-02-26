@@ -1,0 +1,18 @@
+name: kuairand-recsys
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - jupyterlab
+  - notebook
+  - ipykernel
+  - pip
+  - pip:
+      - missingno

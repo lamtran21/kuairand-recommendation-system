@@ -1,0 +1,29 @@
+ItemCF Methods Used in This Project
+
+1) BM25-weighted cosine similarity
+- The model applies BM25-style weighting to user-item interactions before computing item-item cosine similarity.
+- This helps reduce popularity dominance and improves item discrimination.
+
+2) Top-K item neighbor pruning
+- For each item, only the top-K most similar neighbors are kept in the sparse similarity matrix.
+- This reduces noise and improves efficiency.
+
+3) Shrinkage regularization
+- A shrink term is added to the similarity denominator.
+- This stabilizes similarity values for low-support item pairs.
+
+4) Multi-similarity support in implementation
+- Implemented modes: cosine, jaccard, adjusted_cosine, bm25_cosine.
+- Current main/best setting uses bm25_cosine.
+
+5) Seen-item filtering during recommendation
+- Items already interacted with by the user in training are excluded from recommendations.
+
+6) Popularity-penalized re-ranking (popularity debiasing)
+- Final score is penalized by item popularity:
+  final_score = cf_score / (log1p(item_popularity + 1) ^ gamma)
+- Current default gamma in run_itemcf.py is 0.5.
+
+7) LOO-compatible evaluation setup
+- Evaluation follows temporal leave-one-out with one ground-truth item per user.
+- Metrics reported at multiple cutoffs (e.g., @10/@20/@50).

@@ -21,120 +21,38 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from evaluation.metrics import hit_rate_at_k, map_at_k, ndcg_at_k, recall_at_k
 from models.itemcf import predict, train
 
 # -----------------------------------------------------------------------------
 # Tunable Hyper-Parameters
 # -----------------------------------------------------------------------------
-# Number of neighbors kept per item in the sparse similarity matrix.
 GRID_NEIGHBOR_K = [100, 200, 400, 800]
-
-# Shrinkage added in similarity denominator to reduce noisy high similarity on
-# low-support item pairs.
 GRID_SHRINK = [0.0, 10.0, 20.0, 50.0]
-
-# Ranking cutoffs for evaluation. In leave-one-out with one positive per user,
-# Recall@K equals HitRate@K, but we still report all metrics for completeness.
 GRID_EVAL_K = [10, 20, 100, 200]
-
-# Keep exported prediction file at top-100 even if evaluation uses larger K.
 PREDICTION_TOP_K = 100
 
-# Similarity optimization options:
-# - cosine: baseline cosine on weighted implicit interactions.
-# - adjusted_cosine: subtract each user's interaction mean to reduce user-scale bias.
-# - jaccard: binary overlap/union to focus on co-consumption rather than intensity.
-# - bm25_cosine: BM25-style reweighting before cosine to suppress popularity bias.
 GRID_SIMILARITY = ["cosine", "jaccard", "bm25_cosine"]
-
-# Kept fixed in this sweep to control runtime. You can still tune them later.
 FIXED_SIGNIFICANCE_BETA = 0.0
 FIXED_USE_IUF = False
 
-# BM25 parameters (used only when similarity='bm25_cosine').
 BM25_K1 = 1.2
 BM25_B = 0.75
-
-# Popularity penalty for post-scoring reweighting:
-# final_score = cf_score / (log1p(item_pop + 1) ** gamma)
-# gamma=0.0 disables this penalty.
 POPULARITY_PENALTY_GAMMA = 0.5
 
-# Time-decay is intentionally disabled here because current processed artifacts
-# do not include per-interaction timestamps.
 USE_TIME_DECAY = False
-# Execution switches (set at top for quick control).
-# If False and best metrics file exists, the script reuses best config and
-# still refreshes metrics + predictions.
 RUN_GRID_SEARCH = False
-
-# Enable/disable evaluation metric computation and evaluation artifact writing.
+# Keep internal evaluation off by default to avoid conflict with team evaluator.
 RUN_EVALUATION = False
-
-
-def recall_at_k(y_true: dict[int, int], y_pred: dict[int, list[int]], k: int) -> float:
-    vals = []
-    for user, item in y_true.items():
-        preds = y_pred.get(user, [])[:k]
-        vals.append(1.0 if item in preds else 0.0)
-    return float(np.mean(vals)) if vals else 0.0
-
-
-def hit_rate_at_k(y_true: dict[int, int], y_pred: dict[int, list[int]], k: int) -> float:
-    return recall_at_k(y_true, y_pred, k)
-
-
-def ndcg_at_k(y_true: dict[int, int], y_pred: dict[int, list[int]], k: int) -> float:
-    vals = []
-    for user, item in y_true.items():
-        preds = y_pred.get(user, [])[:k]
-        if item in preds:
-            rank = preds.index(item) + 1
-            vals.append(1.0 / np.log2(rank + 1))
-        else:
-            vals.append(0.0)
-    return float(np.mean(vals)) if vals else 0.0
-
-
-def map_at_k(y_true: dict[int, int], y_pred: dict[int, list[int]], k: int) -> float:
-    vals = []
-    for user, item in y_true.items():
-        preds = y_pred.get(user, [])[:k]
-        if item in preds:
-            rank = preds.index(item) + 1
-            vals.append(1.0 / rank)
-        else:
-            vals.append(0.0)
-    return float(np.mean(vals)) if vals else 0.0
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run ItemCF hyper-parameter search.")
-    parser.add_argument(
-        "--train-matrix",
-        type=Path,
-        default=PROJECT_ROOT / "data/processed/train_matrix.npz",
-    )
-    parser.add_argument(
-        "--test-ground-truth",
-        type=Path,
-        default=PROJECT_ROOT / "data/processed/test_ground_truth.json",
-    )
-    parser.add_argument(
-        "--pred-dir",
-        type=Path,
-        default=PROJECT_ROOT / "outputs/model_predictions",
-    )
-    parser.add_argument(
-        "--eval-dir",
-        type=Path,
-        default=PROJECT_ROOT / "outputs/evaluation/itemcf",
-    )
-    parser.add_argument(
-        "--model-dir",
-        type=Path,
-        default=PROJECT_ROOT / "outputs/models",
-    )
+    parser.add_argument("--train-matrix", type=Path, default=PROJECT_ROOT / "data/processed/train_matrix.npz")
+    parser.add_argument("--test-ground-truth", type=Path, default=PROJECT_ROOT / "data/processed/test_ground_truth.json")
+    parser.add_argument("--pred-dir", type=Path, default=PROJECT_ROOT / "outputs/model_predictions")
+    parser.add_argument("--eval-dir", type=Path, default=PROJECT_ROOT / "outputs/evaluation/itemcf")
+    parser.add_argument("--model-dir", type=Path, default=PROJECT_ROOT / "outputs/models")
     return parser.parse_args()
 
 
@@ -160,7 +78,6 @@ def _evaluate_multi_k(
 
 
 def _clip_topk_for_export(rec_df: pd.DataFrame, k: int) -> pd.DataFrame:
-    """Keep only top-k rows per user for exported recommendation file."""
     if "rank" in rec_df.columns:
         out = rec_df[rec_df["rank"] <= k].copy()
     else:
@@ -174,7 +91,6 @@ def _clip_topk_for_export(rec_df: pd.DataFrame, k: int) -> pd.DataFrame:
 
 
 def main():
-    """Load data, train ItemCF, optionally run grid/evaluation, and save outputs."""
     args = parse_args()
     args.pred_dir.mkdir(parents=True, exist_ok=True)
     args.eval_dir.mkdir(parents=True, exist_ok=True)
@@ -209,51 +125,54 @@ def main():
             k=max(PREDICTION_TOP_K, max(GRID_EVAL_K)),
             popularity_penalty_gamma=POPULARITY_PENALTY_GAMMA,
         )
-        export_df = _clip_topk_for_export(rec_df, PREDICTION_TOP_K)
-        export_df.to_csv(best_rec_path, index=False)
+        _clip_topk_for_export(rec_df, PREDICTION_TOP_K).to_csv(best_rec_path, index=False)
         with open(best_model_path, "wb") as f:
             pickle.dump(model, f, protocol=pickle.HIGHEST_PROTOCOL)
 
+        if RUN_EVALUATION:
+            with open(args.test_ground_truth, "r") as f:
+                gt_raw = json.load(f)
+            y_true = {int(k): int(v) for k, v in gt_raw.items()}
+            eval_users = sorted(y_true.keys())
+            eval_rec_df = predict(
+                model=model,
+                interactions=train_matrix,
+                user_ids=eval_users,
+                k=max(GRID_EVAL_K),
+                popularity_penalty_gamma=POPULARITY_PENALTY_GAMMA,
+            )
+            y_pred = _make_pred_dict(eval_rec_df)
+            metrics = _evaluate_multi_k(y_true, y_pred, GRID_EVAL_K)
+            row = {
+                "neighbor_k": int(best_cfg["neighbor_k"]),
+                "shrink": float(best_cfg["shrink"]),
+                "similarity": str(best_cfg["similarity"]),
+                "significance_beta": float(best_cfg.get("significance_beta", FIXED_SIGNIFICANCE_BETA)),
+                "use_iuf": bool(best_cfg.get("use_iuf", FIXED_USE_IUF)),
+                "bm25_k1": float(best_cfg.get("bm25_k1", BM25_K1)),
+                "bm25_b": float(best_cfg.get("bm25_b", BM25_B)),
+                "popularity_penalty_gamma": POPULARITY_PENALTY_GAMMA,
+                "num_eval_users": len(eval_users),
+                **metrics,
+            }
+            with open(best_metrics_path, "w") as f:
+                json.dump(row, f, indent=2)
+
+        print("Best metrics found; skipped grid search and evaluation.")
+        print(f"Predictions: {best_rec_path}")
+        if RUN_EVALUATION:
+            print(f"Metrics: {best_metrics_path}")
+        print(f"Model: {best_model_path}")
+        return
+
+    y_true: dict[int, int] = {}
+    eval_users: list[int] = []
+    max_eval_k = max(GRID_EVAL_K)
+    if RUN_EVALUATION or RUN_GRID_SEARCH:
         with open(args.test_ground_truth, "r") as f:
             gt_raw = json.load(f)
         y_true = {int(k): int(v) for k, v in gt_raw.items()}
         eval_users = sorted(y_true.keys())
-        eval_rec_df = predict(
-            model=model,
-            interactions=train_matrix,
-            user_ids=eval_users,
-            k=max(GRID_EVAL_K),
-            popularity_penalty_gamma=POPULARITY_PENALTY_GAMMA,
-        )
-        y_pred = _make_pred_dict(eval_rec_df)
-        metrics = _evaluate_multi_k(y_true, y_pred, GRID_EVAL_K)
-
-        row = {
-            "neighbor_k": int(best_cfg["neighbor_k"]),
-            "shrink": float(best_cfg["shrink"]),
-            "similarity": str(best_cfg["similarity"]),
-            "significance_beta": float(best_cfg.get("significance_beta", FIXED_SIGNIFICANCE_BETA)),
-            "use_iuf": bool(best_cfg.get("use_iuf", FIXED_USE_IUF)),
-            "bm25_k1": float(best_cfg.get("bm25_k1", BM25_K1)),
-            "bm25_b": float(best_cfg.get("bm25_b", BM25_B)),
-            "popularity_penalty_gamma": POPULARITY_PENALTY_GAMMA,
-            "num_eval_users": len(eval_users),
-            **metrics,
-        }
-        with open(best_metrics_path, "w") as f:
-            json.dump(row, f, indent=2)
-
-        print("Best metrics found; skipped grid search and evaluation.")
-        print(f"Predictions: {best_rec_path}")
-        print(f"Metrics: {best_metrics_path}")
-        print(f"Model: {best_model_path}")
-        return
-
-    with open(args.test_ground_truth, "r") as f:
-        gt_raw = json.load(f)
-    y_true = {int(k): int(v) for k, v in gt_raw.items()}
-    eval_users = sorted(y_true.keys())
-    max_eval_k = max(GRID_EVAL_K)
 
     if RUN_GRID_SEARCH:
         if not RUN_EVALUATION:
@@ -264,19 +183,11 @@ def main():
         best_rec_df = None
         best_model = None
 
-        all_combos = list(
-            itertools.product(
-                GRID_NEIGHBOR_K,
-                GRID_SHRINK,
-                GRID_SIMILARITY,
-            )
-        )
-
+        all_combos = list(itertools.product(GRID_NEIGHBOR_K, GRID_SHRINK, GRID_SIMILARITY))
         print(f"Grid size: {len(all_combos)} combinations")
 
         for idx, (neighbor_k, shrink, similarity) in enumerate(all_combos, start=1):
             t0 = time.time()
-
             model = train(
                 interactions=train_matrix,
                 neighbor_k=neighbor_k,
@@ -331,10 +242,7 @@ def main():
                 f"R@100={row['recall@100']:.4f}, R@200={row['recall@200']:.4f}"
             )
 
-        grid_df = pd.DataFrame(grid_records).sort_values(
-            ["recall@100", "ndcg@100", "map@100"],
-            ascending=False,
-        )
+        grid_df = pd.DataFrame(grid_records).sort_values(["recall@100", "ndcg@100", "map@100"], ascending=False)
         grid_df.to_csv(grid_path, index=False)
         with open(best_metrics_path, "w") as f:
             json.dump(best_by_recall100, f, indent=2)

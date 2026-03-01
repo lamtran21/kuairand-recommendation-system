@@ -1,4 +1,4 @@
-"""Run script for ItemCF baseline on processed KuaiRand artifacts.
+﻿"""Run script for ItemCF baseline on processed KuaiRand artifacts.
 
 All hyper-parameters live at the top for easy tuning.
 """
@@ -35,7 +35,10 @@ GRID_SHRINK = [0.0, 10.0, 20.0, 50.0]
 
 # Ranking cutoffs for evaluation. In leave-one-out with one positive per user,
 # Recall@K equals HitRate@K, but we still report all metrics for completeness.
-GRID_EVAL_K = [10, 20, 50]
+GRID_EVAL_K = [10, 20, 100, 200]
+
+# Keep exported prediction file at top-100 even if evaluation uses larger K.
+PREDICTION_TOP_K = 100
 
 # Similarity optimization options:
 # - cosine: baseline cosine on weighted implicit interactions.
@@ -62,7 +65,7 @@ POPULARITY_PENALTY_GAMMA = 0.5
 USE_TIME_DECAY = False
 # Execution switches (set at top for quick control).
 # If False and best metrics file exists, the script reuses best config and
-# only outputs model predictions (no evaluation).
+# still refreshes metrics + predictions.
 RUN_GRID_SEARCH = False
 
 # Enable/disable evaluation metric computation and evaluation artifact writing.
@@ -156,6 +159,20 @@ def _evaluate_multi_k(
     return out
 
 
+def _clip_topk_for_export(rec_df: pd.DataFrame, k: int) -> pd.DataFrame:
+    """Keep only top-k rows per user for exported recommendation file."""
+    if "rank" in rec_df.columns:
+        out = rec_df[rec_df["rank"] <= k].copy()
+    else:
+        out = (
+            rec_df.sort_values(["user_id", "score"], ascending=[True, False])
+            .groupby("user_id", as_index=False)
+            .head(k)
+            .copy()
+        )
+    return out.sort_values(["user_id", "rank"], ascending=[True, True], kind="stable")
+
+
 def main():
     """Load data, train ItemCF, optionally run grid/evaluation, and save outputs."""
     args = parse_args()
@@ -189,15 +206,46 @@ def main():
             model=model,
             interactions=train_matrix,
             user_ids=np.arange(train_matrix.shape[0], dtype=np.int64),
-            k=max(GRID_EVAL_K),
+            k=max(PREDICTION_TOP_K, max(GRID_EVAL_K)),
             popularity_penalty_gamma=POPULARITY_PENALTY_GAMMA,
         )
-        rec_df.to_csv(best_rec_path, index=False)
+        export_df = _clip_topk_for_export(rec_df, PREDICTION_TOP_K)
+        export_df.to_csv(best_rec_path, index=False)
         with open(best_model_path, "wb") as f:
             pickle.dump(model, f, protocol=pickle.HIGHEST_PROTOCOL)
 
+        with open(args.test_ground_truth, "r") as f:
+            gt_raw = json.load(f)
+        y_true = {int(k): int(v) for k, v in gt_raw.items()}
+        eval_users = sorted(y_true.keys())
+        eval_rec_df = predict(
+            model=model,
+            interactions=train_matrix,
+            user_ids=eval_users,
+            k=max(GRID_EVAL_K),
+            popularity_penalty_gamma=POPULARITY_PENALTY_GAMMA,
+        )
+        y_pred = _make_pred_dict(eval_rec_df)
+        metrics = _evaluate_multi_k(y_true, y_pred, GRID_EVAL_K)
+
+        row = {
+            "neighbor_k": int(best_cfg["neighbor_k"]),
+            "shrink": float(best_cfg["shrink"]),
+            "similarity": str(best_cfg["similarity"]),
+            "significance_beta": float(best_cfg.get("significance_beta", FIXED_SIGNIFICANCE_BETA)),
+            "use_iuf": bool(best_cfg.get("use_iuf", FIXED_USE_IUF)),
+            "bm25_k1": float(best_cfg.get("bm25_k1", BM25_K1)),
+            "bm25_b": float(best_cfg.get("bm25_b", BM25_B)),
+            "popularity_penalty_gamma": POPULARITY_PENALTY_GAMMA,
+            "num_eval_users": len(eval_users),
+            **metrics,
+        }
+        with open(best_metrics_path, "w") as f:
+            json.dump(row, f, indent=2)
+
         print("Best metrics found; skipped grid search and evaluation.")
         print(f"Predictions: {best_rec_path}")
+        print(f"Metrics: {best_metrics_path}")
         print(f"Model: {best_model_path}")
         return
 
@@ -212,7 +260,7 @@ def main():
             raise ValueError("RUN_GRID_SEARCH=True requires RUN_EVALUATION=True.")
 
         grid_records = []
-        best_by_recall50 = None
+        best_by_recall100 = None
         best_rec_df = None
         best_model = None
 
@@ -266,31 +314,32 @@ def main():
             }
             grid_records.append(row)
 
-            key = (row["recall@50"], row["ndcg@50"], row["map@50"])
-            if best_by_recall50 is None or key > (
-                best_by_recall50["recall@50"],
-                best_by_recall50["ndcg@50"],
-                best_by_recall50["map@50"],
+            key = (row["recall@100"], row["ndcg@100"], row["map@100"])
+            if best_by_recall100 is None or key > (
+                best_by_recall100["recall@100"],
+                best_by_recall100["ndcg@100"],
+                best_by_recall100["map@100"],
             ):
-                best_by_recall50 = row
+                best_by_recall100 = row
                 best_rec_df = rec_df.copy()
                 best_model = model
 
             print(
                 f"[{idx}/{len(all_combos)}] sim={similarity}, nk={neighbor_k}, "
                 f"sh={shrink}, sig={FIXED_SIGNIFICANCE_BETA}, iuf={FIXED_USE_IUF} | "
-                f"R@10={row['recall@10']:.4f}, R@20={row['recall@20']:.4f}, R@50={row['recall@50']:.4f}"
+                f"R@10={row['recall@10']:.4f}, R@20={row['recall@20']:.4f}, "
+                f"R@100={row['recall@100']:.4f}, R@200={row['recall@200']:.4f}"
             )
 
         grid_df = pd.DataFrame(grid_records).sort_values(
-            ["recall@50", "ndcg@50", "map@50"],
+            ["recall@100", "ndcg@100", "map@100"],
             ascending=False,
         )
         grid_df.to_csv(grid_path, index=False)
         with open(best_metrics_path, "w") as f:
-            json.dump(best_by_recall50, f, indent=2)
+            json.dump(best_by_recall100, f, indent=2)
         if best_rec_df is not None:
-            best_rec_df.to_csv(best_rec_path, index=False)
+            _clip_topk_for_export(best_rec_df, PREDICTION_TOP_K).to_csv(best_rec_path, index=False)
         if best_model is not None:
             with open(best_model_path, "wb") as f:
                 pickle.dump(best_model, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -300,7 +349,7 @@ def main():
         print(f"Best metrics: {best_metrics_path}")
         print(f"Best recommendations: {best_rec_path}")
         print(f"Best model: {best_model_path}")
-        print(json.dumps(best_by_recall50, indent=2))
+        print(json.dumps(best_by_recall100, indent=2))
         return
 
     model = train(
@@ -317,10 +366,10 @@ def main():
         model=model,
         interactions=train_matrix,
         user_ids=np.arange(train_matrix.shape[0], dtype=np.int64),
-        k=max_eval_k,
+        k=max(PREDICTION_TOP_K, max_eval_k),
         popularity_penalty_gamma=POPULARITY_PENALTY_GAMMA,
     )
-    rec_df.to_csv(best_rec_path, index=False)
+    _clip_topk_for_export(rec_df, PREDICTION_TOP_K).to_csv(best_rec_path, index=False)
     with open(best_model_path, "wb") as f:
         pickle.dump(model, f, protocol=pickle.HIGHEST_PROTOCOL)
 

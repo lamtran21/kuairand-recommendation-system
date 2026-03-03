@@ -1,7 +1,5 @@
 # only allow csv in that folder (and its subfolders)
 *.csv
-!data/**/*.csv
-
 *.parquet
 *.joblib
 *.pt
@@ -9,3 +7,6 @@
 .venv/
 __pycache__/
 .ipynb_checkpoints/
+
+!data/**/*.csv
+!**/model_predictions/*

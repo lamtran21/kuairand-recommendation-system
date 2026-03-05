@@ -1,0 +1,53 @@
+ALS Methods Used in This Project
+
+1) Implicit-feedback ALS with confidence weighting
+- We use the Hu–Koren–Volinsky style implicit ALS formulation.
+- Interaction strength comes from preprocessed watch behaviour:
+  r_ui = log(1 + play_time_ms) for play_time_ms > 0, and 0 otherwise.
+- Confidence for each user–item pair is:
+  c_ui = 1 + alpha * r_ui
+  where alpha is a tunable scaling parameter.
+
+2) Latent factor model (matrix factorization)
+- The user–item interaction matrix is factorized into:
+  U (user_factors) and V (item_factors).
+- Each user and item is represented in a low-dimensional latent space
+  (n_factors), capturing taste and content patterns.
+
+3) Alternating least squares optimization
+- Training alternates between:
+  - fixing item factors and solving for all user factors, then
+  - fixing user factors and solving for all item factors.
+- Each step solves a regularized least-squares system that incorporates
+  the confidence weights for observed interactions.
+
+4) L2 regularization on latent factors
+- A regularization term (lambda) is added when solving for user/item
+  factors.
+- This prevents overfitting and stabilizes solutions for users/items
+  with few interactions.
+
+5) Hyper-parameter tuning via grid search
+- The script experiments/run_als.py runs a small grid search over:
+  - number of latent factors (n_factors)
+  - regularization strength (lambda)
+  - confidence scaling (alpha)
+- For each configuration, the model is trained and evaluated on the
+  temporal leave-one-out split, and results are saved to:
+  outputs/evaluation/als/als_grid_results.csv
+- The best configuration (by Recall@50 / NDCG@50 / MAP@50) is written to:
+  outputs/evaluation/als/als_best_metrics.json
+
+6) Seen-item filtering during recommendation
+- When generating recommendations, items the user has already interacted
+  with in the training matrix are masked out.
+- This ensures the model recommends novel items instead of repeating
+  known interactions.
+
+7) LOO-compatible evaluation setup for ALS
+- ALS shares the same evaluation protocol as ItemCF:
+  - temporal leave-one-out with one ground-truth item per user,
+  - metrics at multiple cutoffs (e.g., @10 / @20 / @50).
+- The ALS run script reports Recall@K, HitRate@K, NDCG@K, and MAP@K and
+  saves them for further analysis and plotting.
+

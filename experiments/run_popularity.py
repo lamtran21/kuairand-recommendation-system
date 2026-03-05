@@ -22,12 +22,12 @@ def parse_args():
     parser.add_argument(
         "--train-matrix",
         type=Path,
-        default=PROJECT_ROOT / "data/train_matrix.npz",
+        default=PROJECT_ROOT / "data/processed/train_matrix.npz",
     )
     parser.add_argument(
         "--test-ground-truth",
         type=Path,
-        default=PROJECT_ROOT / "data/test_ground_truth.json",
+        default=PROJECT_ROOT / "data/processed/test_ground_truth.json",
     )
     parser.add_argument(
         "--pred-dir",

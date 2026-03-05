@@ -12,3 +12,6 @@ __pycache__/
 !**/model_predictions/*outputs/model_predictions/als_recommendations.csv
 outputs/model_predictions/two_stage_gbm_recommendations.csv
 outputs/model_predictions/two_stage_gbm_simple_recommendations.csv
+
+# allow Parquet prediction files
+!outputs/model_predictions/*.parquet

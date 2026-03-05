@@ -30,7 +30,7 @@ from models.itemcf import predict, train
 GRID_NEIGHBOR_K = [100, 200, 400, 800]
 GRID_SHRINK = [0.0, 10.0, 20.0, 50.0]
 GRID_EVAL_K = [10, 20, 100, 200]
-PREDICTION_TOP_K = 100
+PREDICTION_TOP_K = 200
 
 GRID_SIMILARITY = ["cosine", "jaccard", "bm25_cosine"]
 FIXED_SIGNIFICANCE_BETA = 0.0
@@ -100,7 +100,7 @@ def main():
 
     grid_path = args.eval_dir / "itemcf_grid_results.csv"
     best_metrics_path = args.eval_dir / "itemcf_best_metrics.json"
-    best_rec_path = args.pred_dir / "itemcf_recommendations.cf"
+    best_rec_path = args.pred_dir / "itemcf_recommendations.parquet"
     best_model_path = args.model_dir / "itemcf_best_model.pkl"
 
     if (not RUN_GRID_SEARCH) and best_metrics_path.exists():
@@ -125,7 +125,7 @@ def main():
             k=max(PREDICTION_TOP_K, max(GRID_EVAL_K)),
             popularity_penalty_gamma=POPULARITY_PENALTY_GAMMA,
         )
-        _clip_topk_for_export(rec_df, PREDICTION_TOP_K).to_csv(best_rec_path, index=False)
+        _clip_topk_for_export(rec_df, PREDICTION_TOP_K).to_parquet(best_rec_path, index=False)
         with open(best_model_path, "wb") as f:
             pickle.dump(model, f, protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -247,7 +247,7 @@ def main():
         with open(best_metrics_path, "w") as f:
             json.dump(best_by_recall100, f, indent=2)
         if best_rec_df is not None:
-            _clip_topk_for_export(best_rec_df, PREDICTION_TOP_K).to_csv(best_rec_path, index=False)
+            _clip_topk_for_export(best_rec_df, PREDICTION_TOP_K).to_parquet(best_rec_path, index=False)
         if best_model is not None:
             with open(best_model_path, "wb") as f:
                 pickle.dump(best_model, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -277,7 +277,7 @@ def main():
         k=max(PREDICTION_TOP_K, max_eval_k),
         popularity_penalty_gamma=POPULARITY_PENALTY_GAMMA,
     )
-    _clip_topk_for_export(rec_df, PREDICTION_TOP_K).to_csv(best_rec_path, index=False)
+    _clip_topk_for_export(rec_df, PREDICTION_TOP_K).to_parquet(best_rec_path, index=False)
     with open(best_model_path, "wb") as f:
         pickle.dump(model, f, protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -316,3 +316,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

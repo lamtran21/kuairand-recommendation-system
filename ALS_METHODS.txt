@@ -29,13 +29,15 @@ ALS Methods Used in This Project
 
 5) Hyper-parameter tuning via grid search
 - The script experiments/run_als.py runs a small grid search over:
-  - number of latent factors (n_factors)
+ - number of latent factors (n_factors)
   - regularization strength (lambda)
   - confidence scaling (alpha)
 - For each configuration, the model is trained and evaluated on the
   temporal leave-one-out split, and results are saved to:
   outputs/evaluation/als/als_grid_results.csv
-- The best configuration (by Recall@50 / NDCG@50 / MAP@50) is written to:
+- The best configuration is selected using the largest evaluation
+  cutoff in EVAL_K (currently K=200), i.e., by:
+  Recall@200 / NDCG@200 / MAP@200, and written to:
   outputs/evaluation/als/als_best_metrics.json
 
 6) Seen-item filtering during recommendation
@@ -50,4 +52,3 @@ ALS Methods Used in This Project
   - metrics at multiple cutoffs (e.g., @10 / @20 / @50).
 - The ALS run script reports Recall@K, HitRate@K, NDCG@K, and MAP@K and
   saves them for further analysis and plotting.
-

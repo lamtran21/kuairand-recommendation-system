@@ -1,0 +1,115 @@
+GBM Methods Used in This Project
+
+1) Two-stage recommendation architecture
+- Stage 1 (candidate generation):
+  - ALS produces top-K candidate items per user from the implicit
+    interaction matrix (``train_matrix.npz``).
+  - Candidates and scores are written to:
+    ``outputs/model_predictions/als_recommendations.csv``.
+- Stage 2 (re-ranking with GBM):
+  - A gradient boosting classifier (sklearn.ensemble.GradientBoostingClassifier)
+    re-ranks the ALS candidates using hand-crafted features.
+  - The goal is to place each user’s held-out ground-truth item as
+    high as possible in the candidate list.
+
+2) Shared GBM model implementation
+- All GBM variants use the same model code in:
+  - ``models/gbm_reranker.py``
+- Core pieces:
+  - GBMRerankerModel: dataclass wrapper around a trained
+    GradientBoostingClassifier and the list of feature columns.
+  - train_reranker(train_df, feature_columns, label_column):
+    - Extracts X from the specified numeric feature columns and y from
+      the binary ``label`` column (1 = ground-truth item).
+    - Fits GradientBoostingClassifier(random_state=42).
+  - score_candidates(model, candidates_df):
+    - Computes predicted probability of label=1 for each candidate row
+      and returns it as ``gbm_score``.
+
+3) Simple GBM variant (no side features)
+- Script: ``experiments/run_two_stage_gbm_simple.py``
+- Inputs:
+  - train_matrix: ``data/processed/train_matrix.npz`` (CSR interactions).
+  - test_ground_truth: ``data/processed/test_ground_truth.json``
+    mapping user_index → item_index.
+  - ALS predictions:
+    ``outputs/model_predictions/als_recommendations.csv``.
+  - Optional ItemCF predictions:
+    ``outputs/model_predictions/itemcf_recommendations.cf``.
+- Feature table (one row per (user, item) candidate):
+  - ALS features:
+    - ``als_score`` (ALS predicted score).
+    - ``als_rank`` (ALS rank position).
+  - ItemCF features (if available, else defaulted):
+    - ``itemcf_score`` (ItemCF similarity score).
+    - ``itemcf_rank`` (ItemCF rank; missing values default to 999).
+  - Interaction statistics (from train_matrix):
+    - ``user_interactions``: number of non-zero interactions per user.
+    - ``item_popularity``: column sum (aggregate interaction signal) per item.
+- Label definition:
+  - For each user, the held-out last interaction (from the temporal
+    leave-one-out split) is treated as the ground-truth next item.
+  - ``label = 1`` if a candidate’s video_id equals the user’s ground-truth
+    item index, else 0.
+- Outputs:
+  - Re-ranked recommendations:
+    ``outputs/model_predictions/two_stage_gbm_simple_recommendations.csv``
+  - Metrics (Recall@K / HitRate@K / NDCG@K / MAP@K at K in [10,20,50,100,200]):
+    ``outputs/evaluation/two_stage_gbm/two_stage_gbm_simple_metrics.json``
+  - Feature importances:
+    ``outputs/evaluation/two_stage_gbm/two_stage_gbm_simple_feature_importances.json``
+  - Trained model:
+    ``outputs/models/two_stage_gbm_simple_model.pkl``
+
+4) Full GBM variant with side features
+- Script: ``experiments/run_two_stage_gbm.py``
+- Adds user/item side features from KuaiRand-Pure tables on top of the
+  simple feature set.
+- Side-feature sources (under ``data/raw``):
+  - ``user_features_pure.csv``:
+    - Per-user attributes such as:
+      * is_lowactive_period, is_live_streamer, is_video_author
+      * follow_user_num, fans_user_num, friend_user_num, register_days
+      * onehot_feat0–onehot_feat17 (pre-encoded user buckets).
+  - ``video_features_basic_pure.csv``:
+    - Per-item basic attributes (numeric only), e.g.:
+      * visible_status, video_duration, server_width, server_height,
+        music_type.
+  - ``video_features_statistic_pure.csv``:
+    - Per-item aggregated behavior statistics, e.g.:
+      * counts, show_cnt, play_cnt, play_duration, like_cnt,
+        share_cnt, collect_cnt, etc.
+- ID alignment:
+  - Original user_id / video_id are mapped to matrix indices via:
+    - ``data/processed/user_map.json``
+    - ``data/processed/item_map.json``
+  - Side tables are joined on these indices so that ALS, ItemCF, and
+    GBM features refer to the same users and items.
+- Final feature set:
+  - Base features (same as simple GBM):
+    - als_score, als_rank, itemcf_score, itemcf_rank,
+      user_interactions, item_popularity.
+  - Side features:
+    - All selected numeric user columns prefixed with ``user_``.
+    - All selected numeric item columns prefixed with ``item_``.
+- Outputs:
+  - Re-ranked recommendations:
+    ``outputs/model_predictions/two_stage_gbm_recommendations.csv``
+  - Metrics:
+    ``outputs/evaluation/two_stage_gbm/two_stage_gbm_metrics.json``
+  - Feature importances:
+    ``outputs/evaluation/two_stage_gbm/two_stage_gbm_feature_importances.json``
+  - Trained model:
+    ``outputs/models/two_stage_gbm_model.pkl``
+
+5) Evaluation protocol (shared with ALS)
+- Both GBM variants reuse the ALS evaluation setup:
+  - Temporal leave-one-out split with exactly one ground-truth item per user.
+  - Ranking metrics at multiple cutoffs K (10, 20, 50, 100, 200):
+    Recall@K, HitRate@K, NDCG@K, MAP@K.
+- Comparison between ALS and GBM:
+  - ALS metrics are stored under:
+    ``outputs/evaluation/als/``
+  - GBM metrics are stored under:
+    ``outputs/evaluation/two_stage_gbm/`` for direct side-by-side analysis.
+

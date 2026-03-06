@@ -15,3 +15,6 @@ outputs/model_predictions/two_stage_gbm_simple_recommendations.csv
 
 # allow Parquet prediction files
 !outputs/model_predictions/*.parquet
+
+# Ignore Mac system files
+.DS_Store

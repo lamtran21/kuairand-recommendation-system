@@ -15,6 +15,7 @@ This project evaluates several collaborative filtering approaches using the Kuai
 We compare multiple recommendation methods, including popularity-based recommendations, Item-based Collaborative Filtering (ItemCF), Singular Value Decomposition (SVD), and Alternating Least Squares (ALS). In addition, we implement a two-stage recommendation pipeline in which ALS performs candidate retrieval and a Gradient Boosting model re-ranks the candidate set.
 
 ## Repository Structure
+```
 kuairand-recommendation_system/
 │
 ├── data/
@@ -45,3 +46,4 @@ kuairand-recommendation_system/
 │
 ├── requirements.txt
 └── README.md
+```
